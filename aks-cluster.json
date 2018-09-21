@@ -2,13 +2,14 @@
   "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
-    "stage": {
-      "type": "string",
+    "tags": {
+      "type": "object",
+      "defaultValue": {},
       "metadata": {
-        "description": "The stage you are deploying into. Usually one of dev, test, uat or prod"
+        "description": "The tags to be applied to the deployed Redis cache."
       }
     },
-    "clusterNameSuffix": {
+    "name": {
       "type": "string",
       "defaultValue": "aks",
       "metadata": {
@@ -65,28 +66,27 @@
     },
     "adminUsername": {
       "type": "string",
-      "defaultValue": "azureuser",
       "metadata": {
         "description": "User name for the Linux Virtual Machines."
       }
     },
-    "sshRSAPublicKey": {
-      "type": "securestring",
+    "sshKey": {
+      "type": "string",
       "metadata": {
-        "description": "Configure all linux machines with the SSH RSA public key string.  Your key should include three parts, for example 'ssh-rsa AAAAB...snip...UcyupgH azureuser@linuxvm'"
+        "description": "The public key that will allow SSH admin access to the virtual machine"
       }
     },
-    "servicePrincipalClientId": {
+    "keyVaultServicePrincipalSecret": {
+      "type": "securestring",
       "metadata": {
-        "description": "Client ID (used by cloudprovider)"
-      },
-      "type": "securestring"
+        "description": "The secret of the service principal to grant access to the key vault"
+      }
     },
-    "servicePrincipalClientSecret": {
+    "keyVaultServicePrincipalApplicationId": {
+      "type": "securestring",
       "metadata": {
-        "description": "The Service Principal Client Secret."
-      },
-      "type": "securestring"
+        "description": "The application ID of the service principal to grant access to the key vault"
+      }
     },
     "osType": {
       "type": "string",
@@ -107,14 +107,13 @@
       "type": "bool",
       "defaultValue": true,
       "metadata": {
-        "description": "boolean flag to turn on and off of omsagent addon"
+        "description": "Boolean flag to turn on and off of omsagent addon."
       }
     },
-    "enableHttpApplicationRouting": {
-      "type": "bool",
-      "defaultValue": true,
+    "omsWorkspaceResourceId": {
+      "type": "string",
       "metadata": {
-        "description": "boolean flag to turn on and off of http application routing"
+        "description": "Specify the resource id of the OMS workspace."
       }
     },
     "networkPlugin": {
@@ -135,10 +134,9 @@
       "type": "bool",
       "defaultValue": true,
       "metadata": {
-        "description": "boolean flag to turn on and off of RBAC"
+        "description": "Boolean flag to turn on and off of RBAC."
       }
     },
-
     "serviceCidr": {
       "type": "string",
       "metadata": {
@@ -156,33 +154,34 @@
       "metadata": {
         "description": "A CIDR notation IP for Docker bridge."
       }
+    },
+    "subnetResourceId": {
+      "type": "string",
+      "metadata": {
+        "description": "The resource id of the subnet in which to deploy as part of the build pipeline."
+      }
     }
   },
   "variables": {
-    "vnetSubnetID": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/rlad-application-', parameters('location'), '-rg/providers/Microsoft.Network/virtualNetworks/rlad-', parameters('stage'), '-kubernetes-vnet/subnets/rlad-kubernetes-nodes-subnet')]",
-    "omsWorkspaceName": "[concat('rlad-', parameters('stage'), '-oms')]",
-    "resourceName": "[concat('rlad-', parameters('stage'), '-', parameters('clusterNameSuffix'))]",
-    "agentsEndpointDNSNamePrefix": "[concat('rlad-', parameters('stage'), '-', parameters('clusterNameSuffix'), '-agents')]",
-    "masterEndpointDNSNamePrefix": "[concat('rlad-', parameters('stage'), '-', parameters('clusterNameSuffix'))]"
+    "vnetSubnetID": "[parameters('subnetResourceId')]",
+    "agentsEndpointDNSNamePrefix": "[concat(parameters('name'), '-agents')]",
+    "masterEndpointDNSNamePrefix": "[parameters('name')]"
   },
   "resources": [
     {
       "apiVersion": "2018-03-31",
       "type": "Microsoft.ContainerService/managedClusters",
       "location": "[parameters('location')]",
-      "name": "[variables('resourceName')]",
+      "name": "[parameters('name')]",
       "properties": {
         "kubernetesVersion": "[parameters('kubernetesVersion')]",
         "enableRBAC": "[parameters('enableRBAC')]",
         "dnsPrefix": "[variables('masterEndpointDNSNamePrefix')]",
         "addonProfiles": {
-          "httpApplicationRouting": {
-            "enabled": "[parameters('enableHttpApplicationRouting')]"
-          },
           "omsagent": {
             "enabled": "[parameters('enableOmsAgent')]",
             "config": {
-              "logAnalyticsWorkspaceResourceID": "[resourceId('rlad-storage-westus-rg', 'Microsoft.OperationalInsights/workspaces', variables('omsWorkspaceName'))]"
+              "logAnalyticsWorkspaceResourceID": "[parameters('omsWorkspaceResourceId')]"
             }
           }
         },
@@ -205,15 +204,15 @@
           }
         ],
         "servicePrincipalProfile": {
-          "ClientId": "[parameters('servicePrincipalClientId')]",
-          "Secret": "[parameters('servicePrincipalClientSecret')]"
+          "clientId": "[parameters('keyVaultServicePrincipalApplicationId')]",
+          "Secret": "[parameters('keyVaultServicePrincipalSecret')]"
         },
         "linuxProfile": {
           "adminUsername": "[parameters('adminUsername')]",
           "ssh": {
             "publicKeys": [
               {
-                "keyData": "[parameters('sshRSAPublicKey')]"
+                "keyData": "[parameters('sshKey')]"
               }
             ]
           }
@@ -231,7 +230,11 @@
   "outputs": {
     "controlPlaneFQDN": {
       "type": "string",
-      "value": "[reference(concat('Microsoft.ContainerService/managedClusters/', variables('resourceName'))).fqdn]"
+      "value": "[reference(concat('Microsoft.ContainerService/managedClusters/', parameters('name'))).fqdn]"
+    },
+    "resourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ContainerService/managedClusters', parameters('name'))]"
     }
   }
 }
